@@ -24,11 +24,13 @@ library(ggplot2)
 library(gstat)
 library(sp)
 library(maptools)
+library(hydroGOF)
+library(scales)
 
 #------Load Data------
 listdata<-list.files(paste(root,"/DATA/",sep=""))
 # In situ observe
-Prec<-as.data.frame(read.table(paste(root,"/DATA/",grep("P",listdata,value = TRUE),sep=""),header=T))
+Prec<-as.data.frame(read.table(paste(root,"/DATA/",grep("Precipitacion",listdata,value = TRUE),sep=""),header=T))
 Tmax<-read.table(paste(root,"/DATA/",grep("T_Max",listdata,value = TRUE),sep=""),header=T)
 Tmin<-read.table(paste(root,"/DATA/",grep("T_Min",listdata,value = TRUE),sep=""),header=T)
 Tmean<-read.table(paste(root,"/DATA/",grep("T_Mean",listdata,value = TRUE),sep=""),header=T)
@@ -69,21 +71,6 @@ for(k in 2:dim(Prec)[2]){
   M.Median.Prec<-cbind(Median.Prec,M.Median.Prec)
 }
 
-
-#------Draw Time Series------
-par(mfrow=c(8,2))
-colr<-rainbow(18)
-
-for(i in 2:17){
-  par(mgp=c(2,0.5,0))
-  par(mar=c(2.8,3.2,1,0.5)+0.1)
-  
-  plot(M.Median.Prec[,i-1],type="l",col=colr[i],xlab="",ylab="",las=2)
-  ind.out<-which(rowSums(Matrix.Outliers)>10)
-
-}
-
-
 #----Aggregate Time Series and outlier detection-----
 
 mo <- strftime(H.days, "%m") # Clasification by months
@@ -112,11 +99,12 @@ coordinates(grd) <- ~x + y
 gridded(grd) <- TRUE
 # plot(grd, cex = 1.5, col = "grey")
 # points(Coord.Station, pch = 1, col = "red", cex = 1)
-
 Coord.Station1<-Coord.Station
 event.rain<-which(rowSums(Matrix.Outliers)>=1)
 event.rain.out<-which(rowSums(Matrix.Outliers)<=10 & rowSums(Matrix.Outliers)>0)
 
+png(filename =paste(root,"FIGURES","Temporal_Outliers.png",sep="/"), width = wth,height = hth1, 
+    pointsize = 10, res = reso)
 
 hist.out<-hist(rowSums(Matrix.Outliers[event.rain,]),breaks = c(0:16),labels = TRUE,xaxt="n",
      las=2,col = c(rep(gray(0.5),10),rep("red",6)),main="",xlab="Número de  estaciones outliers por evento",
@@ -124,6 +112,10 @@ hist.out<-hist(rowSums(Matrix.Outliers[event.rain,]),breaks = c(0:16),labels = T
 
 axis(1,at=hist.out$mids,labels = 1:16)
 
+legend("topright",c("Evento atípico \n en la cuenca","Eventos atípicos en \n 10 o menos estaciones"),
+       pch = 22 ,pt.bg=c("red",gray(0.5)),col="black",bty = "n",cex=0.8)
+
+dev.off()
 
 Matrix.Outliers2<-Matrix.Outliers
 M.Median.Prec2<-M.Median.Prec
@@ -144,7 +136,7 @@ for(j in 1:length(event.rain.out)){
                  newdata = grd,debug.level=0)
   idw.output1 = as.data.frame(Mod.idw1)  # output is defined as a data table
   names(idw.output1)[1:3] <- c("long", "lat", "var1.pred")
-  # ggplot() + geom_tile(data = idw.output, aes(x = long, y = lat, fill = var1.pred)) 
+  #ggplot() + geom_tile(data = idw.output1, aes(x = long, y = lat, fill = var1.pred))
   
   pred.rain1<-c()
   
@@ -171,15 +163,15 @@ for(j in 1:length(event.rain.out)){
     idw.output2 = as.data.frame(Mod.idw2)  # output is defined as a data table
     names(idw.output2)[1:3] <- c("long", "lat", "var1.pred")
     
-    # ggplot() + geom_tile(data = idw.output, aes(x = long, y = lat, fill = var1.pred)) 
+    # ggplot() + geom_tile(data = idw.output2, aes(x = long, y = lat, fill = var1.pred))
     
     pred.rain2<-c()
     
     for(l in 1:dim(Coord.Station2)[1]){
-      ind.lat<-which(round(Coord.Station2$Latitud[l],2)==idw.output$lat)
-      ind.lon<-which(round(Coord.Station2$Longitud[l],2)==idw.output$long)
+      ind.lat<-which(round(Coord.Station2$Latitud[l],2)==idw.output2$lat)
+      ind.lon<-which(round(Coord.Station2$Longitud[l],2)==idw.output2$long)
       ind.sample<-which(is.element(ind.lat,ind.lon)==TRUE)
-      pred.rain2[l]<-idw.output$var1.pred[ind.lat[ind.sample]]
+      pred.rain2[l]<-idw.output2$var1.pred[ind.lat[ind.sample]]
     }
     
     set.valid<-pred.rain1[c(1:dim(Coord.Station.V)[1],dim(Coord.Station.V)[1]+k)]
@@ -203,6 +195,19 @@ event.rain.def<-which(rowSums(Matrix.Outliers)>10)
 for(i in 1:length(event.rain.def)){
   M.Median.Prec[event.rain.def[i],Matrix.Outliers[event.rain.def[i],]==1]<-NA
 }
+
+# Percentage of outliers spatial-temporal in precipitation time series
+temporal.outlier<-apply(Matrix.Outliers[event.rain,],2,function(x)length(which(x==1)))
+spatial.outlier<-apply(Matrix.Outliers2,2,function(x) length(which(x==2)))
+
+OUT.PREC<-rbind(temporal.outlier,spatial.outlier)
+rownames(OUT.PREC)<-c("Temporal","Spatial")
+colnames(OUT.PREC)<-names(Prec)[2:17]
+
+write.csv(t(OUT.PREC),file=paste(root,"RESULTS","Outliers_Precipitacion.csv",sep="/"))
+
+
+#-----Fill outliers of all basin in precipitation time series-----
 
 missdata<-importDVs("05054000", sdate="1985-01-01", edate="2009-12-31")
 
@@ -243,24 +248,142 @@ write.csv(cbind(H.days,Matrix.Temp),file=paste(root,"RESULTS","Temperatura_prepr
 
 #-----Fill missing Data of Stream Flow-----
 
+flow.stations<-c("Date","Payande","Carmen","PTE Carretera","Yuldaima","San Vicente",
+                 "Cocora","PTE Luisa","Chuzo","PTE Bolívar")
+colnames(Flow)<-flow.stations
+
+at.year<-seq(min(H.days),max(H.days),by="year")
+
+png(filename =paste(root,"FIGURES","Fill missing flow data.png",sep="/"), width = wth,height = hth1, 
+    pointsize = 10, res = reso)
+
 par(mfrow=c(5,2))
 
 for(k in 2:10){
-  par(mgp=c(2,0.5,0))
+  par(mgp=c(1.1,0.5,0))
   par(mar=c(2.8,3.2,1,0.5)+0.1)
-  plot(Flow[,k],col=rainbow(k)[k-1],type="l",main=names(Flow)[k],cex.main=0.8)
+  plot(H.days,Flow[,k],col=rainbow(k)[k-1],type="l",main=names(Flow)[k],cex.main=0.8,las=2,cex.lab=0.7,xaxt="n",
+       xlab="Tiempo [dia]",ylab=expression(paste("Caudal [m"^3,"/s]",sep="")),lwd=0.3,cex.lab=0.5,tck=-0.03,
+       cex.axis=0.5,bty="n",lwd.ticks=0.5)
   salida<-which(is.na(Flow[,k])==TRUE)
   print(length(salida))
-  lines(salida,rep(min(Flow[,k],na.rm=T)*1.1,length(salida)),col="black",type="h")
+  lines(H.days[salida],salida,rep(max(Flow[,k],na.rm=T)*1.1,length(salida)),col=alpha("gray88",alpha = 0.1),
+        type="h",lwd=0.5)
+  axis.Date(side = 1, at = at.year, format="%Y",labels = TRUE, 
+            tck=-0.03,las=2,cex.axis=0.5,col="gray45",lwd=0.5)
+  box(lwd=0.5)
 }
 
+dev.off()
 
-plot(rescale(Flow[,2],to=c(-1,1),range(Flow[,2:10],na.rm=T)),type="l",xlim = c(8000,9000),ylim=c(-1,0.7))
-for(i in c(3,5,4,7,10,9,8))
-lines(rescale(Flow[,i],to=c(-1,1),range(Flow[,2:10],na.rm=T)),col=i)
+# Multivariate Flow Correlation Function  
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...){
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y,use = "na.or.complete"))
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex = 1.2)
+}
+# Figure about linear correlation between flow time series
+png(filename =paste(root,"FIGURES","Correlation_Flows.png",sep="/"), width = wth,height = hth1, 
+    pointsize = 10, res = reso)
+par(mgp=c(2,0.5,0))
+pairs(Flow[,2:10], lower.panel = panel.smooth, upper.panel = panel.cor,pch=16, 
+      cex=0.3,col=gray(0.5),las=2,cex.axis=0.5,tck = -0.1)
+dev.off()
+
+# Fill missing data in Payande
+missdata[[2]]<-Flow[,2]
+filldata<-fillMiss(missdata,block=100, pmiss=50)
+Flow[,2]<-filldata$val
+
+# Fill missing data in Cocora
+
+size.flow<-which(is.na(Flow[,7])==FALSE)
+
+ind.cal<-sample(size.flow,round(length(size.flow)*0.6,2),replace = F)
+ind.val<-size.flow[-ind.cal]
+  
+# mod3<-nls(Flow[ind,7]~A*Flow[ind,3]+B*Flow[ind,2]+C,start = list(A=0.1,B=0.5,C=0.2))
+mod3<-nls(Flow[ind.cal,7]~A*Flow[ind.cal,3]+B,start = list(A=0.1,B=0.5))
+
+Cocora.miss<-coef(mod3)[1]*Flow[-size.flow,3]+coef(mod3)[2]
+
+Flow[-size.flow,7]<-Cocora.miss
+
+# Fill missing data in Cocora PTE Bolivar
+size.flow<-which(is.na(Flow[,10])==FALSE)
 
 
-Flow.scale<-apply(Flow[,2:10],2,function(x) rescale(x,to=c(-1,1),range(x,na.rm=T)))
+
+SSE<-c()
+Coef.mod4<-c()
+ind.cal<-list()
+
+for(j in 1:1000){
+  ind.cal[[j]]<-sample(size.flow,round(length(size.flow)*0.6,2),replace = F)
+  ind.val<-size.flow[-ind.cal[[j]]]
+  
+  ind<-ind.cal[[j]]
+  # mod4<-nls(Flow[ind.cal,10]~A*Flow[ind.cal,3]+B*Flow[ind.cal,4]+C,start = list(A=0.1,B=0.5,C=0.2))
+  mod4<-nls(Flow[ind,10]~A*Flow[ind,3]+B,start = list(A=0.1,B=0.5))
+  Coef.mod4<-rbind(Coef.mod4,coef(mod4))
+  
+  sim<-coef(mod4)[1]*Flow[ind.cal[[j]],3]+coef(mod4)[2]
+  obs<-Flow[ind,10]
+  SSE[j]<-NSE(sim,obs)
+  
+}
+
+Coef.mod4<-Coef.mod4[which.max(SSE),]
+
+Bolivar.miss<-Coef.mod4[1]*Flow[-size.flow,3]+Coef.mod4[2]
+
+Flow[-size.flow,10]<-Bolivar.miss
+
+# Save flow time series
+write.csv(Flow,file=paste(root,"RESULTS","Caudales.csv",sep="/"))
+
+#------Draw outliers in precipitation time series------
+png(filename =paste(root,"FIGURES","Outliers_Precipitation_2.png",sep="/"), width = wth,height = hth1, 
+    pointsize = 10, res = reso)
+par(mfrow=c(2,1))
+
+for(k in 3:4){
+  
+  i<-c(13,6,9,17)[k]
+  par(mgp=c(1,0.4,0))
+  par(mar=c(2.8,3.2,1,0.5)+0.1)
+  plot(H.days,M.Median.Prec2[,i-1],type="l",col=alpha("gray84",alpha=0.7),las=2,xaxt="n",yaxt="n",lwd=0.3,
+       main=c("Estación Cajamarca","Estación Pastales","Estación El Palmar","Estación Chicoral")[k],
+       cex.main=0.7,ylab="Precipitación [mm/dia]", xlab="Tiempo [dia]",cex.lab=0.65,tck=-0.02,cex.axis=0.5,
+       bty="n")
+  
+  ind.out.event<-which(Matrix.Outliers[,i-1]==1)
+  ind.out.basin<-which(rowSums(Matrix.Outliers)>10 & Matrix.Outliers[,i-1]==1)
+  ind.out.temspa<-which(Matrix.Outliers2[,i-1]==2)
+  
+  points(H.days[ind.out.event],M.Median.Prec2[ind.out.event,i-1],col="red",pch=2,cex=0.55,lwd=0.35)
+  points(H.days[ind.out.basin],M.Median.Prec2[ind.out.basin,i-1],col="black",pch=16,cex=0.35,lwd=0.35)
+  points(H.days[ind.out.temspa],M.Median.Prec2[ind.out.temspa,i-1],col="blue",pch=0,cex=0.45,lwd=0.35)
+  axis.Date(side = 1, at = at.year, format="%Y",labels = TRUE, 
+            tck=-0.02,las=2,cex.axis=0.5,lwd=0.5)
+  axis(2,tck=-0.02,cex.axis=0.5,lwd=0.5,las=2)
+  box(lwd=0.5)
+  
+  if(k==1){
+    legend("top",c("Outlier Temporal-Estación","Outlier Temporal-Cuenca","Outlier Espacio-Temporal"),
+           pch = c(2,16,0),col=c("red","black","blue"),cex=0.4,box.lwd = 0.5,pt.lwd =0.35)
+  }
+}
+
+dev.off()
+
+
+
+
 
 
 
